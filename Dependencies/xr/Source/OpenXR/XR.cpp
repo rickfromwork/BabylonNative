@@ -35,6 +35,8 @@ namespace xr
                 SpatialAnchorSupported = TryEnableExtension(XR_MSFT_SPATIAL_ANCHOR_EXTENSION_NAME, extensionProperties);
                 SecondaryViewConfigurationSupported = TryEnableExtension(XR_MSFT_SECONDARY_VIEW_CONFIGURATION_EXTENSION_NAME, extensionProperties);
                 FirstPersonObserverSupported = TryEnableExtension(XR_MSFT_FIRST_PERSON_OBSERVER_EXTENSION_NAME, extensionProperties);
+                HandInteractionSupported = TryEnableExtension(XR_MSFT_HAND_INTERACTION_EXTENSION_NAME, extensionProperties);
+                HandTrackingMeshSupported = TryEnableExtension(XR_MSFT_HAND_TRACKING_MESH_EXTENSION_NAME, extensionProperties);
             }
 
             std::vector<const char*> Names{};
@@ -43,6 +45,8 @@ namespace xr
             bool SpatialAnchorSupported{ false };
             bool SecondaryViewConfigurationSupported{ false };
             bool FirstPersonObserverSupported{ false };
+            bool HandInteractionSupported{ false };
+            bool HandTrackingMeshSupported{ false };
 
         private:
             bool TryEnableExtension(
