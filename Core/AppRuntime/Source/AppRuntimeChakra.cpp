@@ -48,7 +48,7 @@ namespace Babylon
 
 #ifdef _DEBUG
         // Put Chakra in debug mode.
-        ThrowIfFailed(JsStartDebugging());
+    //    ThrowIfFailed(JsStartDebugging());
 #endif
 
         Napi::Env env = Napi::Attach();
