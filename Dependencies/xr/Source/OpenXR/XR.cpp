@@ -35,7 +35,8 @@ namespace xr
                 SpatialAnchorSupported = TryEnableExtension(XR_MSFT_SPATIAL_ANCHOR_EXTENSION_NAME, extensionProperties);
                 SecondaryViewConfigurationSupported = TryEnableExtension(XR_MSFT_SECONDARY_VIEW_CONFIGURATION_EXTENSION_NAME, extensionProperties);
                 FirstPersonObserverSupported = TryEnableExtension(XR_MSFT_FIRST_PERSON_OBSERVER_EXTENSION_NAME, extensionProperties);
-                HandInteractionSupported = TryEnableExtension(XR_MSFT_HAND_INTERACTION_EXTENSION_NAME, extensionProperties);
+                HandTrackingSupported = TryEnableExtension(XR_EXT_HAND_TRACKING_EXTENSION_NAME, extensionProperties);
+            //    HandInteractionSupported = TryEnableExtension(XR_MSFT_HAND_INTERACTION_EXTENSION_NAME, extensionProperties);
                 HandTrackingMeshSupported = TryEnableExtension(XR_MSFT_HAND_TRACKING_MESH_EXTENSION_NAME, extensionProperties);
             }
 
@@ -45,7 +46,8 @@ namespace xr
             bool SpatialAnchorSupported{ false };
             bool SecondaryViewConfigurationSupported{ false };
             bool FirstPersonObserverSupported{ false };
-            bool HandInteractionSupported{ false };
+            bool HandTrackingSupported{ false };
+         //   bool HandInteractionSupported{ false };
             bool HandTrackingMeshSupported{ false };
 
         private:
@@ -231,31 +233,80 @@ namespace xr
             static constexpr char* DEFAULT_XR_ACTION_SET_LOCALIZED_NAME{ "Default XR Action Set" };
             XrActionSet ActionSet{};
 
-            static constexpr std::array<const char*, 2> CONTROLLER_SUBACTION_PATH_PREFIXES
+            static constexpr std::array<const char*, 2> HAND_SUBACTION_PATH_PREFIXES
             {
                 "/user/hand/left",
                 "/user/hand/right"
             };
-            std::array<XrPath, CONTROLLER_SUBACTION_PATH_PREFIXES.size()> ControllerSubactionPaths{};
+            std::array<XrPath, HAND_SUBACTION_PATH_PREFIXES.size()> ControllerSubactionPaths{};
 
             static constexpr char* CONTROLLER_GET_GRIP_POSE_ACTION_NAME{ "controller_get_pose_action" };
             static constexpr char* CONTROLLER_GET_GRIP_POSE_ACTION_LOCALIZED_NAME{ "Controller Pose" };
             static constexpr char* CONTROLLER_GET_GRIP_POSE_PATH_SUFFIX{ "/input/grip/pose" };
             XrAction ControllerGetGripPoseAction{};
-            std::array<XrSpace, CONTROLLER_SUBACTION_PATH_PREFIXES.size()> ControllerGripPoseSpaces{};
+            std::array<XrSpace, HAND_SUBACTION_PATH_PREFIXES.size()> ControllerGripPoseSpaces{};
 
             static constexpr char* CONTROLLER_GET_AIM_POSE_ACTION_NAME{ "controller_get_aim_action" };
             static constexpr char* CONTROLLER_GET_AIM_POSE_ACTION_LOCALIZED_NAME{ "Controller Aim" };
             static constexpr char* CONTROLLER_GET_AIM_POSE_PATH_SUFFIX{ "/input/aim/pose" };
             XrAction ControllerGetAimPoseAction{};
-            std::array<XrSpace, CONTROLLER_SUBACTION_PATH_PREFIXES.size()> ControllerAimPoseSpaces{};
+            std::array<XrSpace, HAND_SUBACTION_PATH_PREFIXES.size()> ControllerAimPoseSpaces{};
+
+            //static constexpr char* HAND_GET_AIM_POSE_ACTION_NAME{ "controller_get_aim_action" };
+            //static constexpr char* HAND_GET_AIM_POSE_ACTION_LOCALIZED_NAME{ "Controller Aim" };
+            //static constexpr char* HAND_GET_AIM_POSE_PATH_SUFFIX{ "/input/aim/pose" };
+            //XrAction HandGetAimPoseAction{};
+            //std::array<XrSpace, HAND_SUBACTION_PATH_PREFIXES.size()> ControllerAimPoseSpaces{};
 
             static constexpr char* DEFAULT_XR_INTERACTION_PROFILE{ "/interaction_profiles/khr/simple_controller" };
+            //static constexpr char* DEFAULT_HAND_INTERACTION_PROFILE{ "/interaction_profiles/microsoft/hand_interaction" };
 
             std::vector<Frame::InputSource> ActiveInputSources{};
             std::vector<Frame::Plane> Planes{};
             std::vector<FeaturePoint> FeaturePointCloud{};
         } ActionResources{};
+            
+        struct HandMeshData{
+            void AllocateXRHandMesh(uint32_t indices, uint32_t vertices)
+            {
+                handMeshIndices.resize(indices);
+                handMeshVertices.resize(vertices);
+
+                handMesh.indexBuffer.indexCapacityInput = (uint32_t)handMeshIndices.size();
+                handMesh.indexBuffer.indices = handMeshIndices.data();
+
+                handMesh.vertexBuffer.vertexCapacityInput = (uint32_t)handMeshVertices.size();
+                handMesh.vertexBuffer.vertices = handMeshVertices.data();
+
+                HandMeshBuffersAllocated = true;
+            };
+
+            std::vector<uint32_t> handMeshIndices{};
+            std::vector<XrHandMeshVertexMSFT> handMeshVertices{};
+                
+            XrHandMeshMSFT handMesh{XR_TYPE_HAND_MESH_MSFT};
+
+            bool HandMeshBuffersAllocated{ false };
+        };
+
+        struct HandInfo {
+            XrHandEXT hand{};
+            XrHandTrackerEXT HandTracker{};
+            XrSpace handSpace{};
+
+            HandMeshData handMeshData{};
+        };
+        
+        struct
+        {
+            XrBool32 SupportsHandMeshes{ false };
+            uint32_t maxMeshIndices{ 0 };
+            uint32_t maxMeshVertices{ 0 };
+
+            bool HandMeshesInitialized{ false };
+
+            std::array<HandInfo, 2> handsInfo;
+        } HandData;
 
         float DepthNearZ{ DEFAULT_DEPTH_NEAR_Z };
         float DepthFarZ{ DEFAULT_DEPTH_FAR_Z };
@@ -310,6 +361,8 @@ namespace xr
 
         void RequestEndSession()
         {
+            UninitializeHandResources();
+
             xrRequestExitSession(Session);
         }
 
@@ -396,9 +449,18 @@ namespace xr
 
         void InitializeRenderResources(XrInstance instance, XrSystemId systemId)
         {
-            // Read graphics properties for preferred swapchain length and logging.
+            // Read graphics properties for preferred swapchain length and logging, and hand mesh availability.
             XrSystemProperties systemProperties{ XR_TYPE_SYSTEM_PROPERTIES };
+            XrSystemHandTrackingMeshPropertiesMSFT systemHandTrackingProperties{ XR_TYPE_SYSTEM_HAND_TRACKING_MESH_PROPERTIES_MSFT };
+            InsertExtensionStruct(systemProperties, systemHandTrackingProperties);
             XrCheck(xrGetSystemProperties(instance, systemId, &systemProperties));
+
+            // Create the hand mesh buffer
+            HandData = {systemHandTrackingProperties.supportsHandTrackingMesh,
+                            systemHandTrackingProperties.maxHandMeshIndexCount,
+                            systemHandTrackingProperties.maxHandMeshVertexCount};
+
+            InitializeHandResources();
 
             const XrViewConfigurationType primaryType = HmdImpl.PrimaryViewConfigurationType;
             auto& primaryRenderResource = RenderResources.ResourceMap[primaryType];
@@ -412,6 +474,81 @@ namespace xr
             PopulateSwapchains(primaryRenderResource.ViewState);
         }
 
+        void InitializeHandResources()
+        {
+            if (!HandData.SupportsHandMeshes)
+            {
+                return;
+            }
+
+            std::array<XrHandEXT, 2> hands{XR_HAND_LEFT_EXT, XR_HAND_RIGHT_EXT};
+
+            {
+                //XrHandTrackerCreateInfoEXT TrackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+                //TrackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+
+                //XrHandMeshSpaceCreateInfoMSFT MeshSpaceCreateInfo{XR_TYPE_HAND_MESH_SPACE_CREATE_INFO_MSFT};
+                //MeshSpaceCreateInfo.poseInHandMeshSpace = {{0, 0, 0, 1}, {0, 0, 0}};
+                //MeshSpaceCreateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
+
+                for (int i = 0; i < HandData.handsInfo.size(); i++)
+                {
+                                    XrHandTrackerCreateInfoEXT TrackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+                TrackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+
+                    // Create the hand trackers
+                    HandData.handsInfo[i].hand = hands[i];
+                    TrackerCreateInfo.hand = hands[i];
+                    XrCheck(HmdImpl.Extensions->xrCreateHandTrackerEXT(Session, &TrackerCreateInfo, &HandData.handsInfo[i].HandTracker));
+                    
+                XrHandMeshSpaceCreateInfoMSFT MeshSpaceCreateInfo{XR_TYPE_HAND_MESH_SPACE_CREATE_INFO_MSFT};
+                MeshSpaceCreateInfo.poseInHandMeshSpace = {{0, 0, 0, 1}, {0, 0, 0}};
+                MeshSpaceCreateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
+                    // Preallocate buffers for the meshes
+                    HandData.handsInfo[i].handMeshData.AllocateXRHandMesh(HandData.maxMeshIndices, HandData.maxMeshVertices);
+                    // Create the hand mesh spaces
+                    XrCheck(HmdImpl.Extensions->xrCreateHandMeshSpaceMSFT(HandData.handsInfo[i].HandTracker,
+                                                      &MeshSpaceCreateInfo,
+                                                      &HandData.handsInfo[i].handSpace));
+
+                }
+
+                HandData.HandMeshesInitialized = true;
+            }
+            /*  xrhandTracker specific:
+                xrLocateHandJointsEXT
+                    - xrHandTracker (from before)
+                    - xrHandJointsLocateInfoEXT
+                    - xrHandJointLocationsEXT (can chain structures to get joint velocities)
+                        - xrHandJointLocationEXT
+            >>> there's example code!
+
+                xrHandMesh stuff:
+                xrHandMeshSpaceCreateInfo
+                    - xrHandPoseTypeMSFT
+                    - xrPoseSpace
+                xrUpdateHandMeshMSFT (gets updated hand mesh data, called per-frame)
+                    - handTracker (from before)
+                    - xrHandMeshUpdateInfoMSFT
+                        - xrTime
+                        - xrHandPoseTypeMSFT (XR_HAND_POSE_TYPE_TRACKED_MSFT for visual tracking, XR_HAND_POSE_TYPE_REFERENCE_OPEN_PALM_MSFT for some set-up styles)
+                    - xrHandMeshMSFT (_out_, should have buffers pre-allocated)
+                        - xrHandMeshIndexBufferMSFT
+                        - xrHandMeshVertexBufferMSFT
+
+            >> also example code!
+            */
+
+        }
+
+        void UninitializeHandResources()
+        {
+            for (HandInfo handInfo : HandData.handsInfo)
+            {
+                HmdImpl.Extensions->xrDestroyHandTrackerEXT(handInfo.HandTracker);
+            }
+        }
+
         void InitializeActionResources(XrInstance instance)
         {
             // Create action set
@@ -421,9 +558,9 @@ namespace xr
             XrCheck(xrCreateActionSet(instance, &actionSetInfo, &ActionResources.ActionSet));
 
             // Cache paths for subactions
-            for (size_t idx = 0; idx < ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES.size(); ++idx)
+            for (size_t idx = 0; idx < ActionResources.HAND_SUBACTION_PATH_PREFIXES.size(); ++idx)
             {
-                XrCheck(xrStringToPath(instance, ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES[idx], &ActionResources.ControllerSubactionPaths[idx]));
+                XrCheck(xrStringToPath(instance, ActionResources.HAND_SUBACTION_PATH_PREFIXES[idx], &ActionResources.ControllerSubactionPaths[idx]));
             }
 
             std::vector<XrActionSuggestedBinding> bindings{};
@@ -438,10 +575,10 @@ namespace xr
                 actionInfo.subactionPaths = ActionResources.ControllerSubactionPaths.data();
                 XrCheck(xrCreateAction(ActionResources.ActionSet, &actionInfo, &ActionResources.ControllerGetGripPoseAction));
                 // For each controller subaction
-                for (size_t idx = 0; idx < ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES.size(); ++idx)
+                for (size_t idx = 0; idx < ActionResources.HAND_SUBACTION_PATH_PREFIXES.size(); ++idx)
                 {
                     // Create suggested binding
-                    std::string path{ ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES[idx] };
+                    std::string path{ ActionResources.HAND_SUBACTION_PATH_PREFIXES[idx] };
                     path.append(ActionResources.CONTROLLER_GET_GRIP_POSE_PATH_SUFFIX);
                     bindings.push_back({ ActionResources.ControllerGetGripPoseAction });
                     XrCheck(xrStringToPath(instance, path.data(), &bindings.back().binding));
@@ -459,16 +596,54 @@ namespace xr
             {
                 XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO };
                 actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+                strcpy_s(actionInfo.actionName, ActionResources.CONTROLLER_GET_AIM_POSE_ACTION_NAME);//CHANGE CONTROLLER_GET_AIM_POSE_ACTION_NAME
+                strcpy_s(actionInfo.localizedActionName, ActionResources.CONTROLLER_GET_AIM_POSE_ACTION_LOCALIZED_NAME);//CHANGE CONTROLLER_GET_AIM_POSE_ACTION_LOCALIZED_NAME
+                actionInfo.countSubactionPaths = static_cast<uint32_t>(ActionResources.ControllerSubactionPaths.size());
+                actionInfo.subactionPaths = ActionResources.ControllerSubactionPaths.data();
+                XrCheck(xrCreateAction(ActionResources.ActionSet, &actionInfo, &ActionResources.ControllerGetAimPoseAction));//CHANGE ControllerGetAimPoseAction
+                // For each controller subaction
+                for (size_t idx = 0; idx < ActionResources.HAND_SUBACTION_PATH_PREFIXES.size(); ++idx)
+                {
+                    // Create suggested binding
+                    std::string path{ ActionResources.HAND_SUBACTION_PATH_PREFIXES[idx] };
+                    path.append(ActionResources.CONTROLLER_GET_AIM_POSE_PATH_SUFFIX);//CHANGE CONTROLLER_GET_AIM_POSE_PATH_SUFFIX
+                    bindings.push_back({ ActionResources.ControllerGetAimPoseAction });//CHANGE ControllerGetAimPoseAction
+                    XrCheck(xrStringToPath(instance, path.data(), &bindings.back().binding));
+
+                    // Create subaction space
+                    XrActionSpaceCreateInfo actionSpaceCreateInfo{ XR_TYPE_ACTION_SPACE_CREATE_INFO };
+                    actionSpaceCreateInfo.action = ActionResources.ControllerGetAimPoseAction;//CHANGE ControllerGetAimPoseAction
+                    actionSpaceCreateInfo.poseInActionSpace = IDENTITY_TRANSFORM;
+                    actionSpaceCreateInfo.subactionPath = ActionResources.ControllerSubactionPaths[idx];
+                    XrCheck(xrCreateActionSpace(Session, &actionSpaceCreateInfo, &ActionResources.ControllerAimPoseSpaces[idx]));//CHANGE ControllerAimPoseSpaces
+                }
+            }
+            {
+                // Provide suggested bindings to instance
+                XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+                XrCheck(xrStringToPath(instance, ActionResources.DEFAULT_XR_INTERACTION_PROFILE, &suggestedBindings.interactionProfile));
+                suggestedBindings.suggestedBindings = bindings.data();
+                suggestedBindings.countSuggestedBindings = (uint32_t)bindings.size();
+                XrCheck(xrSuggestInteractionProfileBindings(instance, &suggestedBindings));
+            }
+
+        //    if (supports XR_MSFT_HAND_INTERACTION_EXTENSION_NAME)
+         //   {
+            /*
+            // Create hand get aim pose action, suggested bindings, and spaces
+            {
+                XrActionCreateInfo actionInfo{ XR_TYPE_ACTION_CREATE_INFO };
+                actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
                 strcpy_s(actionInfo.actionName, ActionResources.CONTROLLER_GET_AIM_POSE_ACTION_NAME);
                 strcpy_s(actionInfo.localizedActionName, ActionResources.CONTROLLER_GET_AIM_POSE_ACTION_LOCALIZED_NAME);
                 actionInfo.countSubactionPaths = static_cast<uint32_t>(ActionResources.ControllerSubactionPaths.size());
                 actionInfo.subactionPaths = ActionResources.ControllerSubactionPaths.data();
                 XrCheck(xrCreateAction(ActionResources.ActionSet, &actionInfo, &ActionResources.ControllerGetAimPoseAction));
                 // For each controller subaction
-                for (size_t idx = 0; idx < ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES.size(); ++idx)
+                for (size_t idx = 0; idx < ActionResources.HAND_SUBACTION_PATH_PREFIXES.size(); ++idx)
                 {
                     // Create suggested binding
-                    std::string path{ ActionResources.CONTROLLER_SUBACTION_PATH_PREFIXES[idx] };
+                    std::string path{ ActionResources.HAND_SUBACTION_PATH_PREFIXES[idx] };
                     path.append(ActionResources.CONTROLLER_GET_AIM_POSE_PATH_SUFFIX);
                     bindings.push_back({ ActionResources.ControllerGetAimPoseAction });
                     XrCheck(xrStringToPath(instance, path.data(), &bindings.back().binding));
@@ -481,14 +656,14 @@ namespace xr
                     XrCheck(xrCreateActionSpace(Session, &actionSpaceCreateInfo, &ActionResources.ControllerAimPoseSpaces[idx]));
                 }
             }
-
-            // Provide suggested bindings to instance
-            XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
-            XrCheck(xrStringToPath(instance, ActionResources.DEFAULT_XR_INTERACTION_PROFILE, &suggestedBindings.interactionProfile));
-            suggestedBindings.suggestedBindings = bindings.data();
-            suggestedBindings.countSuggestedBindings = (uint32_t)bindings.size();
-            XrCheck(xrSuggestInteractionProfileBindings(instance, &suggestedBindings));
-
+                // Provide suggested hand binding
+                XrInteractionProfileSuggestedBinding suggestedBindings{ XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING };
+                XrCheck(xrStringToPath(instance, ActionResources.DEFAULT_HAND_INTERACTION_PROFILE, &suggestedBindings.interactionProfile));
+                suggestedBindings.suggestedBindings = bindings.data();
+                suggestedBindings.countSuggestedBindings = (uint32_t)bindings.size();
+                XrCheck(xrSuggestInteractionProfileBindings(instance, &suggestedBindings));
+            }*/
+            
             XrSessionActionSetsAttachInfo attachInfo{ XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO };
             attachInfo.countActionSets = 1;
             attachInfo.actionSets = &ActionResources.ActionSet;
@@ -747,7 +922,7 @@ namespace xr
             depthInfoView.subImage.imageArrayIndex = 0;
         }
     };
-
+    
     System::Session::Frame::Frame(Session::Impl& sessionImpl)
         : Views{ sessionImpl.RenderResources.ActiveFrameViews }
         , InputSources{ sessionImpl.ActionResources.ActiveInputSources }
@@ -930,6 +1105,33 @@ namespace xr
                 }
             }
 
+            // Render hands
+            if (sessionImpl.HandData.HandMeshesInitialized)
+            {
+                XrHandMeshUpdateInfoMSFT updateInfo{XR_TYPE_HAND_MESH_UPDATE_INFO_MSFT};
+                updateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
+                updateInfo.time = m_impl->displayTime;
+
+                for (auto handInfo : sessionImpl.HandData.handsInfo)
+                {
+                    XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.HandTracker, &updateInfo, &handInfo.handMeshData.handMesh));
+
+                    // Check if hand input is focused, and in tracking range
+                    if (handInfo.handMeshData.handMesh.isActive)
+                    {
+                        if (handInfo.handMeshData.handMesh.indexBufferChanged)
+                        {
+                            // Process indices in indexBuffer.indices
+                        }
+
+                        if (handInfo.handMeshData.handMesh.vertexBufferChanged)
+                        {
+                            // Process vertices in vertexBuffer.vertices and leftHandMeshSpace
+                        }
+                    }
+                }
+            }
+
             // Locate all the things.
             auto& actionResources = m_impl->sessionImpl.ActionResources;
 
@@ -939,7 +1141,7 @@ namespace xr
             syncInfo.activeActionSets = activeActionSets.data();
             XrCheck(xrSyncActions(m_impl->sessionImpl.Session, &syncInfo));
 
-            InputSources.resize(actionResources.CONTROLLER_SUBACTION_PATH_PREFIXES.size());
+            InputSources.resize(actionResources.HAND_SUBACTION_PATH_PREFIXES.size());
             for (size_t idx = 0; idx < InputSources.size(); ++idx)
             {
                 // Get grip space
@@ -998,7 +1200,7 @@ namespace xr
             }
         }
     }
-
+    
     void System::Session::Frame::GetHitTestResults(std::vector<HitResult>&, Ray, xr::HitTestTrackableType) const {
         // Stubbed out for now, should be implemented if we want to support OpenXR based passthrough AR devices.
     }
