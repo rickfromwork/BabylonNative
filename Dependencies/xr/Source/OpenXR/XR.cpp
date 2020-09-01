@@ -267,7 +267,7 @@ namespace xr
         } ActionResources{};
             
         struct HandMeshData{
-            void AllocateXRHandMesh(uint32_t indices, uint32_t vertices)
+            void AllocateXRHandMeshBuffers(uint32_t indices, uint32_t vertices)
             {
                 handMeshIndices.resize(indices);
                 handMeshVertices.resize(vertices);
@@ -278,7 +278,7 @@ namespace xr
                 handMesh.vertexBuffer.vertexCapacityInput = (uint32_t)handMeshVertices.size();
                 handMesh.vertexBuffer.vertices = handMeshVertices.data();
 
-                HandMeshBuffersAllocated = true;
+                handMeshBuffersAllocated = true;
             };
 
             std::vector<uint32_t> handMeshIndices{};
@@ -286,24 +286,48 @@ namespace xr
                 
             XrHandMeshMSFT handMesh{XR_TYPE_HAND_MESH_MSFT};
 
-            bool HandMeshBuffersAllocated{ false };
+            bool handMeshBuffersAllocated{ false };
+        };
+
+        struct HandJointData {
+            void AllocateXRHandJoints()
+            {
+                locations.next = &velocities;
+                locations.jointCount = XR_HAND_JOINT_COUNT_EXT;
+                locations.jointLocations = jointLocations;
+
+                velocities.jointCount = XR_HAND_JOINT_COUNT_EXT;
+                velocities.jointVelocities = jointVelocities;
+                
+                handJointsAllocated = true;
+            };
+
+            XrHandJointLocationEXT jointLocations[XR_HAND_JOINT_COUNT_EXT];
+            XrHandJointVelocityEXT jointVelocities[XR_HAND_JOINT_COUNT_EXT];
+
+            XrHandJointLocationsEXT locations{XR_TYPE_HAND_JOINT_LOCATIONS_EXT};
+            XrHandJointVelocitiesEXT velocities{XR_TYPE_HAND_JOINT_VELOCITIES_EXT};
+
+            bool handJointsAllocated{ false };
         };
 
         struct HandInfo {
             XrHandEXT hand{};
-            XrHandTrackerEXT HandTracker{};
+            XrHandTrackerEXT handTracker{};
             XrSpace handSpace{};
 
             HandMeshData handMeshData{};
+            HandJointData handJointData{};
         };
         
         struct
         {
+            XrBool32 supportsHandTracking{ false };
             XrBool32 SupportsHandMeshes{ false };
             uint32_t maxMeshIndices{ 0 };
             uint32_t maxMeshVertices{ 0 };
 
-            bool HandMeshesInitialized{ false };
+            bool HandsInitialized{ false };
 
             std::array<HandInfo, 2> handsInfo;
         } HandData;
@@ -450,15 +474,16 @@ namespace xr
         void InitializeRenderResources(XrInstance instance, XrSystemId systemId)
         {
             // Read graphics properties for preferred swapchain length and logging, and hand mesh availability.
-            XrSystemProperties systemProperties{ XR_TYPE_SYSTEM_PROPERTIES };
-            XrSystemHandTrackingMeshPropertiesMSFT systemHandTrackingProperties{ XR_TYPE_SYSTEM_HAND_TRACKING_MESH_PROPERTIES_MSFT };
-            InsertExtensionStruct(systemProperties, systemHandTrackingProperties);
+            XrSystemHandTrackingMeshPropertiesMSFT handTrackingMeshSystemProperties{ XR_TYPE_SYSTEM_HAND_TRACKING_MESH_PROPERTIES_MSFT };
+            XrSystemHandTrackingPropertiesEXT handTrackingSystemProperties{ XR_TYPE_SYSTEM_HAND_TRACKING_PROPERTIES_EXT, &handTrackingMeshSystemProperties };
+            XrSystemProperties systemProperties{ XR_TYPE_SYSTEM_PROPERTIES, &handTrackingSystemProperties };
             XrCheck(xrGetSystemProperties(instance, systemId, &systemProperties));
 
             // Create the hand mesh buffer
-            HandData = {systemHandTrackingProperties.supportsHandTrackingMesh,
-                            systemHandTrackingProperties.maxHandMeshIndexCount,
-                            systemHandTrackingProperties.maxHandMeshVertexCount};
+            HandData = {handTrackingSystemProperties.supportsHandTracking,
+                        handTrackingMeshSystemProperties.supportsHandTrackingMesh,
+                        handTrackingMeshSystemProperties.maxHandMeshIndexCount,
+                        handTrackingMeshSystemProperties.maxHandMeshVertexCount};
 
             InitializeHandResources();
 
@@ -476,76 +501,52 @@ namespace xr
 
         void InitializeHandResources()
         {
-            if (!HandData.SupportsHandMeshes)
+            if (!HandData.supportsHandTracking)
             {
                 return;
             }
 
             std::array<XrHandEXT, 2> hands{XR_HAND_LEFT_EXT, XR_HAND_RIGHT_EXT};
 
+            XrHandTrackerCreateInfoEXT trackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
+            trackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
+
+		    XrHandMeshSpaceCreateInfoMSFT meshSpaceCreateInfo{XR_TYPE_HAND_MESH_SPACE_CREATE_INFO_MSFT};
+            meshSpaceCreateInfo.poseInHandMeshSpace = {{0, 0, 0, 1}, {0, 0, 0}};
+            meshSpaceCreateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
+
+            for (int i = 0; i < HandData.handsInfo.size(); i++)
             {
-                //XrHandTrackerCreateInfoEXT TrackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
-                //TrackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
-
-                //XrHandMeshSpaceCreateInfoMSFT MeshSpaceCreateInfo{XR_TYPE_HAND_MESH_SPACE_CREATE_INFO_MSFT};
-                //MeshSpaceCreateInfo.poseInHandMeshSpace = {{0, 0, 0, 1}, {0, 0, 0}};
-                //MeshSpaceCreateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
-
-                for (int i = 0; i < HandData.handsInfo.size(); i++)
-                {
-                                    XrHandTrackerCreateInfoEXT TrackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
-                TrackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
-
-                    // Create the hand trackers
-                    HandData.handsInfo[i].hand = hands[i];
-                    TrackerCreateInfo.hand = hands[i];
-                    XrCheck(HmdImpl.Extensions->xrCreateHandTrackerEXT(Session, &TrackerCreateInfo, &HandData.handsInfo[i].HandTracker));
+                // Create the hand trackers
+                HandData.handsInfo[i].hand = hands[i];
+                trackerCreateInfo.hand = hands[i];
+                XrCheck(HmdImpl.Extensions->xrCreateHandTrackerEXT(Session, &trackerCreateInfo, &HandData.handsInfo[i].handTracker));
                     
-                XrHandMeshSpaceCreateInfoMSFT MeshSpaceCreateInfo{XR_TYPE_HAND_MESH_SPACE_CREATE_INFO_MSFT};
-                MeshSpaceCreateInfo.poseInHandMeshSpace = {{0, 0, 0, 1}, {0, 0, 0}};
-                MeshSpaceCreateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
-                    // Preallocate buffers for the meshes
-                    HandData.handsInfo[i].handMeshData.AllocateXRHandMesh(HandData.maxMeshIndices, HandData.maxMeshVertices);
+                // Preallocate buffers
+                HandData.handsInfo[i].handJointData.AllocateXRHandJoints();
+
+                if (HandData.SupportsHandMeshes)
+                {
+                    HandData.handsInfo[i].handMeshData.AllocateXRHandMeshBuffers(HandData.maxMeshIndices, HandData.maxMeshVertices);
+
                     // Create the hand mesh spaces
-                    XrCheck(HmdImpl.Extensions->xrCreateHandMeshSpaceMSFT(HandData.handsInfo[i].HandTracker,
-                                                      &MeshSpaceCreateInfo,
-                                                      &HandData.handsInfo[i].handSpace));
-
+                    XrCheck(HmdImpl.Extensions->xrCreateHandMeshSpaceMSFT(HandData.handsInfo[i].handTracker,
+                                                                            &meshSpaceCreateInfo,
+                                                                            &HandData.handsInfo[i].handSpace));
                 }
-
-                HandData.HandMeshesInitialized = true;
             }
-            /*  xrhandTracker specific:
-                xrLocateHandJointsEXT
-                    - xrHandTracker (from before)
-                    - xrHandJointsLocateInfoEXT
-                    - xrHandJointLocationsEXT (can chain structures to get joint velocities)
-                        - xrHandJointLocationEXT
-            >>> there's example code!
 
-                xrHandMesh stuff:
-                xrHandMeshSpaceCreateInfo
-                    - xrHandPoseTypeMSFT
-                    - xrPoseSpace
-                xrUpdateHandMeshMSFT (gets updated hand mesh data, called per-frame)
-                    - handTracker (from before)
-                    - xrHandMeshUpdateInfoMSFT
-                        - xrTime
-                        - xrHandPoseTypeMSFT (XR_HAND_POSE_TYPE_TRACKED_MSFT for visual tracking, XR_HAND_POSE_TYPE_REFERENCE_OPEN_PALM_MSFT for some set-up styles)
-                    - xrHandMeshMSFT (_out_, should have buffers pre-allocated)
-                        - xrHandMeshIndexBufferMSFT
-                        - xrHandMeshVertexBufferMSFT
-
-            >> also example code!
-            */
-
+            HandData.HandsInitialized = true;
         }
 
         void UninitializeHandResources()
         {
-            for (HandInfo handInfo : HandData.handsInfo)
+            if (HandData.HandsInitialized)
             {
-                HmdImpl.Extensions->xrDestroyHandTrackerEXT(handInfo.HandTracker);
+                for (HandInfo handInfo : HandData.handsInfo)
+                {
+                    HmdImpl.Extensions->xrDestroyHandTrackerEXT(handInfo.handTracker);
+                }
             }
         }
 
@@ -922,7 +923,7 @@ namespace xr
             depthInfoView.subImage.imageArrayIndex = 0;
         }
     };
-    
+//#pragma optimize( "", off )
     System::Session::Frame::Frame(Session::Impl& sessionImpl)
         : Views{ sessionImpl.RenderResources.ActiveFrameViews }
         , InputSources{ sessionImpl.ActionResources.ActiveInputSources }
@@ -1106,15 +1107,32 @@ namespace xr
             }
 
             // Render hands
-            if (sessionImpl.HandData.HandMeshesInitialized)
+            if (sessionImpl.HandData.HandsInitialized)
             {
+                XrHandJointsLocateInfoEXT locateInfo{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+                locateInfo.baseSpace = m_impl->sessionImpl.SceneSpace;
+                locateInfo.time = m_impl->displayTime;
+
+                // Update hand meshes
                 XrHandMeshUpdateInfoMSFT updateInfo{XR_TYPE_HAND_MESH_UPDATE_INFO_MSFT};
                 updateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
                 updateInfo.time = m_impl->displayTime;
 
                 for (auto handInfo : sessionImpl.HandData.handsInfo)
                 {
-                    XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.HandTracker, &updateInfo, &handInfo.handMeshData.handMesh));
+                    XrCheck(sessionImpl.HmdImpl.Extensions->xrLocateHandJointsEXT(handInfo.handTracker, &locateInfo, &handInfo.handJointData.locations));
+
+                    if (handInfo.handJointData.locations.isActive)
+                    {
+                        auto& indexTip = handInfo.handJointData.jointLocations[XR_HAND_JOINT_INDEX_TIP_EXT];
+                        const XrPosef &indexTipInWorld = indexTip.pose;
+                        const float indexTipRadius = indexTip.radius;
+
+                        UNREFERENCED_PARAMETER(indexTipInWorld);
+                        UNREFERENCED_PARAMETER(indexTipRadius);
+                    }
+
+                    XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.handTracker, &updateInfo, &handInfo.handMeshData.handMesh));
 
                     // Check if hand input is focused, and in tracking range
                     if (handInfo.handMeshData.handMesh.isActive)
@@ -1200,7 +1218,7 @@ namespace xr
             }
         }
     }
-    
+//#pragma optimize( "", on )
     void System::Session::Frame::GetHitTestResults(std::vector<HitResult>&, Ray, xr::HitTestTrackableType) const {
         // Stubbed out for now, should be implemented if we want to support OpenXR based passthrough AR devices.
     }
