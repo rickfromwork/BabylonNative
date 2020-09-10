@@ -224,11 +224,9 @@ namespace Babylon
 
     struct FrameBufferManager final
     {
-        static constexpr uint16_t DEFAULT_FRAME_BUFFER_VIEW_ID = 0;
-
         FrameBufferManager()
         {
-            m_boundFrameBuffer = m_backBuffer = new FrameBufferData(BGFX_INVALID_HANDLE, DEFAULT_FRAME_BUFFER_VIEW_ID, bgfx::getStats()->width, bgfx::getStats()->height);
+            m_boundFrameBuffer = m_backBuffer = new FrameBufferData(BGFX_INVALID_HANDLE, GetNewViewId(), bgfx::getStats()->width, bgfx::getStats()->height);
         }
 
         FrameBufferData* CreateNew(bgfx::FrameBufferHandle frameBufferHandle, uint16_t width, uint16_t height)
@@ -247,10 +245,7 @@ namespace Babylon
 
             // TODO: Consider doing this only on bgfx::reset(); the effects of this call don't survive reset, but as
             // long as there's no reset this doesn't technically need to be called every time the frame buffer is bound.
-            m_boundFrameBuffer->SetUpView(
-                m_boundFrameBuffer == m_backBuffer
-                    ? DEFAULT_FRAME_BUFFER_VIEW_ID
-                    : GetNewViewId());
+            m_boundFrameBuffer->SetUpView(GetNewViewId());
 
             // bgfx::setTexture()? Why?
             // TODO: View order?
@@ -278,13 +273,13 @@ namespace Babylon
 
         void Reset()
         {
-            m_nextId = DEFAULT_FRAME_BUFFER_VIEW_ID;
+            m_nextId = 0;
         }
 
     private:
         FrameBufferData* m_boundFrameBuffer{nullptr};
         FrameBufferData* m_backBuffer{nullptr};
-        uint16_t m_nextId{DEFAULT_FRAME_BUFFER_VIEW_ID};
+        uint16_t m_nextId{0};
     };
 
     struct UniformInfo final
