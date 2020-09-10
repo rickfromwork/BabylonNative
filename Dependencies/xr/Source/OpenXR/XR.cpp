@@ -506,7 +506,7 @@ namespace xr
                 return;
             }
 
-            std::array<XrHandEXT, 2> hands{XR_HAND_LEFT_EXT, XR_HAND_RIGHT_EXT};
+            constexpr std::array<XrHandEXT, 2> HANDEDNESS_EXT{XR_HAND_LEFT_EXT, XR_HAND_RIGHT_EXT};
 
             XrHandTrackerCreateInfoEXT trackerCreateInfo{XR_TYPE_HAND_TRACKER_CREATE_INFO_EXT};
             trackerCreateInfo.handJointSet = XR_HAND_JOINT_SET_DEFAULT_EXT;
@@ -518,8 +518,8 @@ namespace xr
             for (int i = 0; i < HandData.handsInfo.size(); i++)
             {
                 // Create the hand trackers
-                HandData.handsInfo[i].hand = hands[i];
-                trackerCreateInfo.hand = hands[i];
+                HandData.handsInfo[i].hand = HANDEDNESS_EXT[i];
+                trackerCreateInfo.hand = HANDEDNESS_EXT[i];
                 XrCheck(HmdImpl.Extensions->xrCreateHandTrackerEXT(Session, &trackerCreateInfo, &HandData.handsInfo[i].handTracker));
                     
                 // Preallocate buffers
@@ -547,6 +547,8 @@ namespace xr
                 {
                     HmdImpl.Extensions->xrDestroyHandTrackerEXT(handInfo.handTracker);
                 }
+
+                HandData.HandsInitialized = false;
             }
         }
 
@@ -1106,50 +1108,6 @@ namespace xr
                 }
             }
 
-            // Render hands
-            if (sessionImpl.HandData.HandsInitialized)
-            {
-                XrHandJointsLocateInfoEXT locateInfo{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
-                locateInfo.baseSpace = m_impl->sessionImpl.SceneSpace;
-                locateInfo.time = m_impl->displayTime;
-
-                // Update hand meshes
-                XrHandMeshUpdateInfoMSFT updateInfo{XR_TYPE_HAND_MESH_UPDATE_INFO_MSFT};
-                updateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
-                updateInfo.time = m_impl->displayTime;
-
-                for (auto handInfo : sessionImpl.HandData.handsInfo)
-                {
-                    XrCheck(sessionImpl.HmdImpl.Extensions->xrLocateHandJointsEXT(handInfo.handTracker, &locateInfo, &handInfo.handJointData.locations));
-
-                    if (handInfo.handJointData.locations.isActive)
-                    {
-                        auto& indexTip = handInfo.handJointData.jointLocations[XR_HAND_JOINT_INDEX_TIP_EXT];
-                        const XrPosef &indexTipInWorld = indexTip.pose;
-                        const float indexTipRadius = indexTip.radius;
-
-                        UNREFERENCED_PARAMETER(indexTipInWorld);
-                        UNREFERENCED_PARAMETER(indexTipRadius);
-                    }
-
-                    XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.handTracker, &updateInfo, &handInfo.handMeshData.handMesh));
-
-                    // Check if hand input is focused, and in tracking range
-                    if (handInfo.handMeshData.handMesh.isActive)
-                    {
-                        if (handInfo.handMeshData.handMesh.indexBufferChanged)
-                        {
-                            // Process indices in indexBuffer.indices
-                        }
-
-                        if (handInfo.handMeshData.handMesh.vertexBufferChanged)
-                        {
-                            // Process vertices in vertexBuffer.vertices and leftHandMeshSpace
-                        }
-                    }
-                }
-            }
-
             // Locate all the things.
             auto& actionResources = m_impl->sessionImpl.ActionResources;
 
@@ -1213,6 +1171,87 @@ namespace xr
                         inputSource.AimSpace.Pose.Orientation.Y = location.pose.orientation.y;
                         inputSource.AimSpace.Pose.Orientation.Z = location.pose.orientation.z;
                         inputSource.AimSpace.Pose.Orientation.W = location.pose.orientation.w;
+                    }
+                }
+
+                // Get joint space
+                if (sessionImpl.HandData.HandsInitialized)
+                {
+                    XrSpace space = actionResources.ControllerAimPoseSpaces[idx];
+                    XrSpaceLocation location{ XR_TYPE_SPACE_LOCATION };
+                    XrCheck(xrLocateSpace(space, m_impl->sessionImpl.SceneSpace, m_impl->displayTime, &location));
+
+                    constexpr XrSpaceLocationFlags RequiredFlags =
+                        XR_SPACE_LOCATION_POSITION_VALID_BIT |
+                        XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
+                        XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
+                        XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
+
+                    auto& inputSource = InputSources[idx];
+                    inputSource.TrackedThisFrame = (location.locationFlags & RequiredFlags) == RequiredFlags;
+                    if (inputSource.TrackedThisFrame)
+                    {
+                        XrHandJointsLocateInfoEXT locateInfo{XR_TYPE_HAND_JOINTS_LOCATE_INFO_EXT};
+                        locateInfo.baseSpace = m_impl->sessionImpl.SceneSpace;
+                        locateInfo.time = m_impl->displayTime;
+
+                        // Update hand meshes
+                        XrHandMeshUpdateInfoMSFT updateInfo{XR_TYPE_HAND_MESH_UPDATE_INFO_MSFT};
+                        updateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
+                        updateInfo.time = m_impl->displayTime;
+
+                        for (auto handInfo : sessionImpl.HandData.handsInfo)
+                        {
+                            XrCheck(sessionImpl.HmdImpl.Extensions->xrLocateHandJointsEXT(handInfo.handTracker, &locateInfo, &handInfo.handJointData.locations));
+
+                            if (handInfo.handJointData.locations.isActive)
+                            {
+                                // Toss the palm joint (index 0), as babylonJS doesn't use it
+                                if (inputSource.Hand.size() != handInfo.handJointData.locations.jointCount - 1)
+                                {
+                                    //inputSource.Hand.reserve(handInfo.handJointData.locations.jointCount);
+                                    inputSource.Hand = std::vector<Space>(handInfo.handJointData.locations.jointCount - 1);
+                                }
+
+                                assert(inputSource.Hand.size() == handInfo.handJointData.locations.jointCount - 1);
+                                
+                                for (uint32_t i = 0; i < handInfo.handJointData.locations.jointCount - 1; i++)
+                                {
+                                    auto jointPose = handInfo.handJointData.jointLocations[i + 1].pose;
+
+                                    inputSource.Hand[i].Pose.Position.X = jointPose.position.x;
+                                    inputSource.Hand[i].Pose.Position.Y = jointPose.position.y;
+                                    inputSource.Hand[i].Pose.Position.Z = jointPose.position.z;
+                                    inputSource.Hand[i].Pose.Orientation.X = jointPose.orientation.x;
+                                    inputSource.Hand[i].Pose.Orientation.Y = jointPose.orientation.y;
+                                    inputSource.Hand[i].Pose.Orientation.Z = jointPose.orientation.z;
+                                    inputSource.Hand[i].Pose.Orientation.W = jointPose.orientation.w;
+                                }
+                                /*
+                                auto& indexTip = handInfo.handJointData.jointLocations[XR_HAND_JOINT_INDEX_TIP_EXT];
+                                const XrPosef &indexTipInWorld = indexTip.pose;
+                                const float indexTipRadius = indexTip.radius;
+
+                                UNREFERENCED_PARAMETER(indexTipInWorld);
+                                UNREFERENCED_PARAMETER(indexTipRadius);*/
+                            }
+
+                            XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.handTracker, &updateInfo, &handInfo.handMeshData.handMesh));
+
+                            // Check if hand input is focused, and in tracking range
+                            if (handInfo.handMeshData.handMesh.isActive)
+                            {
+                                if (handInfo.handMeshData.handMesh.indexBufferChanged)
+                                {
+                                    // Process indices in indexBuffer.indices
+                                }
+
+                                if (handInfo.handMeshData.handMesh.vertexBufferChanged)
+                                {
+                                    // Process vertices in vertexBuffer.vertices and leftHandMeshSpace
+                                }
+                            }
+                        }
                     }
                 }
             }
