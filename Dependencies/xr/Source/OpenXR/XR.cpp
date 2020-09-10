@@ -1200,56 +1200,46 @@ namespace xr
                         updateInfo.handPoseType = XR_HAND_POSE_TYPE_TRACKED_MSFT;
                         updateInfo.time = m_impl->displayTime;
 
-                        for (auto handInfo : sessionImpl.HandData.handsInfo)
+                        auto handInfo = sessionImpl.HandData.handsInfo[idx];
+                        XrCheck(sessionImpl.HmdImpl.Extensions->xrLocateHandJointsEXT(handInfo.handTracker, &locateInfo, &handInfo.handJointData.locations));
+
+                        if (handInfo.handJointData.locations.isActive)
                         {
-                            XrCheck(sessionImpl.HmdImpl.Extensions->xrLocateHandJointsEXT(handInfo.handTracker, &locateInfo, &handInfo.handJointData.locations));
-
-                            if (handInfo.handJointData.locations.isActive)
+                            // Toss the palm joint (index 0), as babylonJS doesn't use it
+                            if (inputSource.Hand.size() != handInfo.handJointData.locations.jointCount - 1)
                             {
-                                // Toss the palm joint (index 0), as babylonJS doesn't use it
-                                if (inputSource.Hand.size() != handInfo.handJointData.locations.jointCount - 1)
-                                {
-                                    //inputSource.Hand.reserve(handInfo.handJointData.locations.jointCount);
-                                    inputSource.Hand = std::vector<Space>(handInfo.handJointData.locations.jointCount - 1);
-                                }
-
-                                assert(inputSource.Hand.size() == handInfo.handJointData.locations.jointCount - 1);
-                                
-                                for (uint32_t i = 0; i < handInfo.handJointData.locations.jointCount - 1; i++)
-                                {
-                                    auto jointPose = handInfo.handJointData.jointLocations[i + 1].pose;
-
-                                    inputSource.Hand[i].Pose.Position.X = jointPose.position.x;
-                                    inputSource.Hand[i].Pose.Position.Y = jointPose.position.y;
-                                    inputSource.Hand[i].Pose.Position.Z = jointPose.position.z;
-                                    inputSource.Hand[i].Pose.Orientation.X = jointPose.orientation.x;
-                                    inputSource.Hand[i].Pose.Orientation.Y = jointPose.orientation.y;
-                                    inputSource.Hand[i].Pose.Orientation.Z = jointPose.orientation.z;
-                                    inputSource.Hand[i].Pose.Orientation.W = jointPose.orientation.w;
-                                }
-                                /*
-                                auto& indexTip = handInfo.handJointData.jointLocations[XR_HAND_JOINT_INDEX_TIP_EXT];
-                                const XrPosef &indexTipInWorld = indexTip.pose;
-                                const float indexTipRadius = indexTip.radius;
-
-                                UNREFERENCED_PARAMETER(indexTipInWorld);
-                                UNREFERENCED_PARAMETER(indexTipRadius);*/
+                                inputSource.Hand = std::vector<Space>(handInfo.handJointData.locations.jointCount - 1);
                             }
 
-                            XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.handTracker, &updateInfo, &handInfo.handMeshData.handMesh));
-
-                            // Check if hand input is focused, and in tracking range
-                            if (handInfo.handMeshData.handMesh.isActive)
+                            assert(inputSource.Hand.size() == handInfo.handJointData.locations.jointCount - 1);
+                                
+                            for (uint32_t i = 0; i < handInfo.handJointData.locations.jointCount - 1; i++)
                             {
-                                if (handInfo.handMeshData.handMesh.indexBufferChanged)
-                                {
-                                    // Process indices in indexBuffer.indices
-                                }
+                                auto jointPose = handInfo.handJointData.jointLocations[i + 1].pose;
 
-                                if (handInfo.handMeshData.handMesh.vertexBufferChanged)
-                                {
-                                    // Process vertices in vertexBuffer.vertices and leftHandMeshSpace
-                                }
+                                inputSource.Hand[i].Pose.Position.X = jointPose.position.x;
+                                inputSource.Hand[i].Pose.Position.Y = jointPose.position.y;
+                                inputSource.Hand[i].Pose.Position.Z = jointPose.position.z;
+                                inputSource.Hand[i].Pose.Orientation.X = jointPose.orientation.x;
+                                inputSource.Hand[i].Pose.Orientation.Y = jointPose.orientation.y;
+                                inputSource.Hand[i].Pose.Orientation.Z = jointPose.orientation.z;
+                                inputSource.Hand[i].Pose.Orientation.W = jointPose.orientation.w;
+                            }
+                        }
+
+                        XrCheck(sessionImpl.HmdImpl.Extensions->xrUpdateHandMeshMSFT(handInfo.handTracker, &updateInfo, &handInfo.handMeshData.handMesh));
+
+                        // Check if hand input is focused, and in tracking range
+                        if (handInfo.handMeshData.handMesh.isActive)
+                        {
+                            if (handInfo.handMeshData.handMesh.indexBufferChanged)
+                            {
+                                // Process indices in indexBuffer.indices
+                            }
+
+                            if (handInfo.handMeshData.handMesh.vertexBufferChanged)
+                            {
+                                // Process vertices in vertexBuffer.vertices and leftHandMeshSpace
                             }
                         }
                     }
