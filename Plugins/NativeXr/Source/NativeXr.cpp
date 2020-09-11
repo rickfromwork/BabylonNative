@@ -142,7 +142,6 @@ namespace
             return;
         }
 
-        // Note the absense of Palm - it's missing from the specs, provided in at least OpenXR
         constexpr const size_t HAND_JOINT_COUNT{25};
         constexpr std::array<const char*, HAND_JOINT_COUNT> HAND_JOINT_NAMES{
             "WRIST",
@@ -175,8 +174,6 @@ namespace
             "LITTLE_PHALANX_INTERMEDIATE",
             "LITTLE_PHALANX_DISTAL",
             "LITTLE_PHALANX_TIP"};
-
-        assert(inputSource.Hand.size() == HAND_JOINT_COUNT);
 
         auto env = jsInputSource.Env();
         auto handJointCollection = Napi::Array::New(env, HAND_JOINT_COUNT);

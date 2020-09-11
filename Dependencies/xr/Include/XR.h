@@ -175,48 +175,13 @@ namespace xr
                         Left = 0,
                         Right = 1
                     };
-/*
-                    enum class HandJointNameEnum
-                    {
-                        WRIST = 0,
 
-                        THUMB_METACARPAL = 1,
-                        THUMB_PHALANX_PROXIMAL = 2,
-                        THUMB_PHALANX_DISTAL = 3,
-                        THUMB_PHALANX_TIP = 4,
-
-                        INDEX_METACARPAL = 5,
-                        INDEX_PHALANX_PROXIMAL = 6,
-                        INDEX_PHALANX_INTERMEDIATE = 7,
-                        INDEX_PHALANX_DISTAL = 8,
-                        INDEX_PHALANX_TIP = 9,
-
-                        MIDDLE_METACARPAL = 10,
-                        MIDDLE_PHALANX_PROXIMAL = 11,
-                        MIDDLE_PHALANX_INTERMEDIATE = 12,
-                        MIDDLE_PHALANX_DISTAL = 13,
-                        MIDDLE_PHALANX_TIP = 14,
-
-                        RING_METACARPAL = 15,
-                        RING_PHALANX_PROXIMAL = 16,
-                        RING_PHALANX_INTERMEDIATE = 17,
-                        RING_PHALANX_DISTAL = 18,
-                        RING_PHALANX_TIP = 19,
-
-                        LITTLE_METACARPAL = 20,
-                        LITTLE_PHALANX_PROXIMAL = 21,
-                        LITTLE_PHALANX_INTERMEDIATE = 22,
-                        LITTLE_PHALANX_DISTAL = 23,
-                        LITTLE_PHALANX_TIP = 24
-                    };
-*/
                     const Identifier ID{ NEXT_ID++ };
                     bool TrackedThisFrame{};
                     Space GripSpace{};
                     Space AimSpace{};
                     HandednessEnum Handedness{};
                     std::vector<Space> Hand{};
-                    // std::vector<JointSpace> Hand{};
 
                 private:
                     static inline Identifier NEXT_ID{ 0 };
