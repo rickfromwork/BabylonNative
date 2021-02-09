@@ -337,6 +337,7 @@ namespace Babylon
             JS_CLASS_NAME,
             {InstanceMethod("dispose", &NativeEngine::Dispose),
                 InstanceMethod("getEngine", &NativeEngine::GetEngine),
+                InstanceAccessor("homogeneousDepth", &NativeEngine::HomogeneousDepth, nullptr),
                 InstanceMethod("requestAnimationFrame", &NativeEngine::RequestAnimationFrame),
                 InstanceMethod("createVertexArray", &NativeEngine::CreateVertexArray),
                 InstanceMethod("deleteVertexArray", &NativeEngine::DeleteVertexArray),
@@ -554,6 +555,11 @@ namespace Babylon
     Napi::Value NativeEngine::GetEngine(const Napi::CallbackInfo& info)
     {
         return Napi::External<NativeEngine>::New(info.Env(), this);
+    }
+
+    Napi::Value NativeEngine::HomogeneousDepth(const Napi::CallbackInfo& info)
+    {
+        return Napi::Value::From(info.Env(), bgfx::getCaps()->homogeneousDepth);
     }
 
     void NativeEngine::RequestAnimationFrame(const Napi::CallbackInfo& info)
@@ -794,28 +800,16 @@ namespace Babylon
     void NativeEngine::SetState(const Napi::CallbackInfo& info)
     {
         const auto culling = info[0].As<Napi::Boolean>().Value();
-        const auto reverseSide = info[2].As<Napi::Boolean>().Value();
+        const auto cullBackFaces = info[2].As<Napi::Boolean>().Value();
+        const auto reverseSide = info[3].As<Napi::Boolean>().Value();
 
-        m_engineState &= ~BGFX_STATE_CULL_MASK;
-        if (reverseSide)
+        m_engineState &= ~(BGFX_STATE_CULL_MASK | BGFX_STATE_FRONT_CCW);
+        m_engineState |= reverseSide ? 0 : BGFX_STATE_FRONT_CCW;
+
+        if (culling)
         {
-            m_engineState &= ~BGFX_STATE_FRONT_CCW;
-
-            if (culling)
-            {
-                m_engineState |= BGFX_STATE_CULL_CW;
-            }
+            m_engineState |= cullBackFaces ? BGFX_STATE_CULL_CCW : BGFX_STATE_CULL_CW;
         }
-        else
-        {
-            m_engineState |= BGFX_STATE_FRONT_CCW;
-
-            if (culling)
-            {
-                m_engineState |= BGFX_STATE_CULL_CCW;
-            }
-        }
-
         // TODO: zOffset
         //const auto zOffset = info[1].As<Napi::Number>().FloatValue();
     }
