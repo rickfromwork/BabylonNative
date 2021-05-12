@@ -36,7 +36,7 @@ function CreateSpheresAsync() {
     return Promise.resolve();
 }
 
-function CreateInputHandling(scene) {
+function CreateInputHandling(scene) {/*
     var inputManager = new InputManager();
     var priorX = inputManager.pointerX;
     var priorY = inputManager.pointerY;
@@ -53,6 +53,38 @@ function CreateInputHandling(scene) {
 
         priorX = x;
         priorY = y;
+    });*/
+    const deviceSourceManager = new BABYLON.DeviceSourceManager(scene.getEngine());
+    let priorX = undefined;
+    let priorY = undefined;
+
+    scene.onBeforeRenderObservable.add(function () {
+        let x = undefined;
+        let y = undefined;
+
+        let pointer = deviceSourceManager.getDeviceSource(BABYLON.DeviceType.Touch);
+        if (pointer === null) {
+            pointer = deviceSourceManager.getDeviceSource(BABYLON.DeviceType.Mouse);
+            if (pointer !== null && pointer.getInput(BABYLON.PointerInput.LeftClick) === 0) {
+                pointer = null;
+            }
+        }
+        
+        if (pointer !== null) {
+            x = pointer.getInput(BABYLON.PointerInput.Horizontal);
+            y = pointer.getInput(BABYLON.PointerInput.Vertical);
+
+            if (priorX !== undefined && priorY !== undefined) {
+                scene.activeCamera.alpha += 0.01 * (priorX - x);
+                scene.activeCamera.beta += 0.01 * (priorY - y);
+            }
+
+            priorX = x;
+            priorY = y;
+        } else {
+            priorX = undefined;
+            priorY = undefined;
+        }
     });
 }
 

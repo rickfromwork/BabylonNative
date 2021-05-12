@@ -117,6 +117,7 @@ target_link_to_dependencies(Playground
     PRIVATE NativeCapture
     PRIVATE ChromeDevTools
     PRIVATE NativeEngine
+    PRIVATE NativeInput
     PRIVATE Console
     PRIVATE Window
     PRIVATE ScriptLoader
